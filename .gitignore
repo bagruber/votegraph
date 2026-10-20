@@ -1,0 +1,10 @@
+node_modules
+dist
+*.tsbuildinfo
+.vite
+__pycache__
+
+# Rohdaten (BTVote allein 234 MB) und Zwischenstände — lassen sich mit
+# `pnpm daten` jederzeit neu erzeugen. Im Repo liegt nur public/daten/.
+etl/roh/
+etl/zwischen/

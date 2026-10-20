@@ -1,0 +1,44 @@
+{
+  "bundestag": {
+    "im": "Bundestag",
+    "quelle": "Bis 2021: BTVote, Bergmann, Bailer, Ohmura, Saalfeld, Sieberer und Hohendorf (2022), Harvard Dataverse, doi:10.7910/DVN/24U1FR; Sieberer u. a. (2018), British Journal of Political Science 50(4); Hohendorf und Sieberer (2022), Zeitschrift für Parlamentsfragen 53(2). BTVote erfasst keine fraktionslosen Abgeordneten. Ab 2021: Abstimmungslisten und MdB-Stammdaten des Deutschen Bundestags.",
+    "regierung": {
+      "10": { "text": "Regierung Kohl: CDU/CSU und FDP", "chef": "Helmut Kohl", "rolle": "Kanzler" },
+      "11": { "text": "Regierung Kohl: CDU/CSU und FDP", "chef": "Helmut Kohl", "rolle": "Kanzler" },
+      "12": { "text": "Regierung Kohl: CDU/CSU und FDP", "chef": "Helmut Kohl", "rolle": "Kanzler" },
+      "13": { "text": "Regierung Kohl: CDU/CSU und FDP", "chef": "Helmut Kohl", "rolle": "Kanzler" },
+      "14": { "text": "Regierung Schröder: SPD und Grüne", "chef": "Gerhard Schröder", "rolle": "Kanzler" },
+      "15": { "text": "Regierung Schröder: SPD und Grüne", "chef": "Gerhard Schröder", "rolle": "Kanzler" },
+      "16": { "text": "Regierung Merkel: CDU/CSU und SPD", "chef": "Angela Merkel", "rolle": "Kanzlerin" },
+      "17": { "text": "Regierung Merkel: CDU/CSU und FDP", "chef": "Angela Merkel", "rolle": "Kanzlerin" },
+      "18": { "text": "Regierung Merkel: CDU/CSU und SPD", "chef": "Angela Merkel", "rolle": "Kanzlerin" },
+      "19": { "text": "Regierung Merkel: CDU/CSU und SPD", "chef": "Angela Merkel", "rolle": "Kanzlerin" },
+      "20": { "text": "Regierung Scholz: SPD, Grüne und FDP, ab November 2024 ohne FDP", "chef": "Olaf Scholz", "rolle": "Kanzler" },
+      "21": { "text": "Regierung Merz: CDU/CSU und SPD", "chef": "Friedrich Merz", "rolle": "Kanzler" }
+    }
+  },
+  "bayern": {
+    "im": "Bayerischen Landtag",
+    "abgeordnetenwatch": { "16": 77, "17": 99, "18": 115, "19": 149 },
+    "regierung": {
+      "16": { "text": "Regierung Seehofer: CSU und FDP", "chef": "Horst Seehofer", "rolle": "Ministerpräsident" },
+      "17": { "text": "Regierung Seehofer, ab März 2018 Söder: CSU allein", "chef": "Horst Seehofer", "rolle": "Ministerpräsident" },
+      "18": { "text": "Regierung Söder: CSU und Freie Wähler", "chef": "Markus Söder", "rolle": "Ministerpräsident" },
+      "19": { "text": "Regierung Söder: CSU und Freie Wähler", "chef": "Markus Söder", "rolle": "Ministerpräsident" }
+    }
+  },
+  "baden-wuerttemberg": {
+    "im": "Landtag von Baden-Württemberg",
+    "abgeordnetenwatch": { "17": 126 },
+    "regierung": {
+      "17": { "text": "Regierung Kretschmann: Grüne und CDU", "chef": "Winfried Kretschmann", "rolle": "Ministerpräsident" }
+    }
+  },
+  "brandenburg": {
+    "im": "Landtag Brandenburg",
+    "abgeordnetenwatch": { "7": 120 },
+    "regierung": {
+      "7": { "text": "Regierung Woidke: SPD, CDU und Grüne", "chef": "Dietmar Woidke", "rolle": "Ministerpräsident" }
+    }
+  }
+}
