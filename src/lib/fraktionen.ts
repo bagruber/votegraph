@@ -21,6 +21,15 @@ export function fraktionsname(periode: Periode, f: number): string {
   }
 }
 
+/** Name einer Fraktionskennung ohne Bezug auf eine Periode, für den Verlauf
+ *  über mehrere Wahlperioden. Quellen mit eigenen Namen liefern sie mit. */
+export function kennungsname(kennung: string, namen: Record<string, string>): string {
+  return namen[kennung] ?? ({
+    union: "CDU/CSU", spd: "SPD", gruene: "Grüne", fdp: "FDP", fw: "Freie Wähler", linke: "Linke",
+    bsw: "BSW", afd: "AfD", ekr: "EKR", patrioten: "Patrioten", esn: "ESN",
+  } as Record<string, string>)[kennung] ?? kennung;
+}
+
 export const farbvariable = (kennung: string) =>
   `--f-${kennung === "andere" ? "fraktionslos" : kennung}`;
 

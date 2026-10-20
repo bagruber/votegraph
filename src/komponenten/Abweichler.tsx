@@ -17,10 +17,11 @@ export function abweichungen(a: { summe: number; gegen: number; enthalten: numbe
 
 interface Props {
   periode: Vorbereitet;
+  thema: string | null;
   onAuswahl: (id: string) => void;
 }
 
-export function Abweichler({ periode, onAuswahl }: Props) {
+export function Abweichler({ periode, thema, onAuswahl }: Props) {
   const mindestens = mindestgrundlage(periode.abstimmungen.length);
   const spalten = periode.fraktionen
     .map((kennung, f) => {
@@ -43,6 +44,7 @@ export function Abweichler({ periode, onAuswahl }: Props) {
         Fraktionslinie ist, wie die Mehrheit der anwesenden Fraktionsmitglieder stimmte. Eine Gegenstimme zählt
         voll, eine Enthaltung halb. Wer an wenigen Abstimmungen teilnahm, wird zum Mittel der Fraktion gedämpft;
         aufgeführt ist nur, wer bei mindestens {mindestens} Abstimmungen mit Fraktionslinie dabei war.
+        {thema && <> Die Liste gilt für alle Abstimmungen der Periode, nicht nur für das Thema {thema}.</>}
       </p>
       <div className="abw-spalten">
         {spalten.map(sp => (

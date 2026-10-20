@@ -147,11 +147,11 @@ export default function Raum({ periode, umfang, ego, egoDelta, hervor, chef, far
       von.set(lage.current.get(m.id) ?? p, 3 * i);
       // THREE.Color rechnet Hex in den linearen Farbraum um; der Shader gibt
       // unverändert aus, also zurück nach sRGB, sonst werden alle Farben dunkler.
-      c.set(farben.fraktion(periode.fraktionen[m.f])).convertLinearToSRGB();
+      c.set(m.linie ? farben.tinte : farben.fraktion(periode.fraktionen[m.f])).convertLinearToSRGB();
       farbe.set([c.r, c.g, c.b], 3 * i);
       const gedimmt = hervor !== null && m.f !== hervor;
       if (ego === null) {
-        groesse[i] = i === chef?.i ? 9 : 4.5;
+        groesse[i] = i === chef?.i || m.linie ? 9 : 4.5;
         deckkraft[i] = gedimmt ? 0.12 : 0.95;
       } else {
         groesse[i] = i === ego ? 13 : naechste.has(i) ? 7 : 3.5;
@@ -245,7 +245,7 @@ export default function Raum({ periode, umfang, ego, egoDelta, hervor, chef, far
       {m && zeiger && (
         <div className="raum-etikett" style={{ left: zeiger.x + 12, top: zeiger.y - 34 }}>
           <strong>{m.name}</strong>
-          <span>{fraktionsname(periode, m.f)}</span>
+          <span>{m.linie ? "Mehrheit der Koalition" : [fraktionsname(periode, m.f), m.zusatz].filter(Boolean).join(" · ")}</span>
         </div>
       )}
       <p className="raum-hinweis">Ziehen dreht, Scrollen zoomt.</p>

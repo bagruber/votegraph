@@ -19,6 +19,8 @@ import time
 import urllib.request
 from pathlib import Path
 
+from themen import aus_abgeordnetenwatch
+
 ETL = Path(__file__).parent
 ROH = ETL / "roh" / "abgeordnetenwatch"
 ZWISCHEN = ETL / "zwischen"
@@ -39,6 +41,19 @@ def get(pfad):
     raise RuntimeError(f"abgeordnetenwatch nicht erreichbar: {pfad}")
 
 
+def ergaenze_themen(roh, periode_id, ziel):
+    """Ältere Zwischenspeicher haben noch keine Themen; die stehen in der
+    Abstimmungsliste, eine Anfrage je Periode."""
+    if all("themen" in a for a in roh["abstimmungen"]):
+        return roh
+    themen = {str(p["id"]): [t["label"] for t in p.get("field_topics") or []]
+              for p in get(f"polls?field_legislature={periode_id}&range_end=1000")}
+    for a in roh["abstimmungen"]:
+        a["themen"] = themen.get(str(a["id"]), [])
+    ziel.write_text(json.dumps(roh, ensure_ascii=False), encoding="utf-8")
+    return roh
+
+
 def ergaenze_mandate(roh, ziel):
     """Nicht jedes Mandat, das abstimmt, steht in der Mandatsliste seiner
     Periode (in Bayern 2008–2013 fehlen acht, offenbar Nachrücker). Die
@@ -55,7 +70,8 @@ def ergaenze_mandate(roh, ziel):
 
 def lade(periode_id, ziel):
     if ziel.exists():
-        return ergaenze_mandate(json.loads(ziel.read_text(encoding="utf-8")), ziel)
+        roh = json.loads(ziel.read_text(encoding="utf-8"))
+        return ergaenze_themen(ergaenze_mandate(roh, ziel), periode_id, ziel)
     periode = get(f"parliament-periods/{periode_id}")
     polls = get(f"polls?field_legislature={periode_id}&range_end=1000")
     stimmen = {}
@@ -67,7 +83,8 @@ def lade(periode_id, ziel):
                for m in get(f"candidacies-mandates?parliament_period={periode_id}&type=mandate&range_end=1000")}
     roh = {
         "von": periode["start_date_period"], "bis": periode["end_date_period"],
-        "abstimmungen": [{"id": p["id"], "datum": p["field_poll_date"], "titel": p["label"]} for p in polls],
+        "abstimmungen": [{"id": p["id"], "datum": p["field_poll_date"], "titel": p["label"],
+                          "themen": [t["label"] for t in p.get("field_topics") or []]} for p in polls],
         "stimmen": stimmen, "mandate": mandate,
     }
     ziel.parent.mkdir(parents=True, exist_ok=True)
@@ -115,7 +132,8 @@ def normalisiere(wp, roh):
             "fraktion": "".join(c if c == "-" else str(kennungen.index(c)) for c in fraktionen[pid])}
            for pid in sorted(stimmen, key=lambda i: namen[i].split(" ")[-1] + namen[i])]
     return {"wp": wp, "quelle": "abgeordnetenwatch.de", "von": roh["von"], "bis": roh["bis"],
-            "abstimmungen": [{"datum": a["datum"], "titel": a["titel"], "frei": None} for a in abst],
+            "abstimmungen": [{"datum": a["datum"], "titel": a["titel"], "frei": None,
+                              "themen": aus_abgeordnetenwatch(a["themen"])} for a in abst],
             "fraktionen": kennungen, "namen": [anzeige[k] for k in kennungen], "mdb": mdb}
 
 

@@ -15,6 +15,7 @@ export interface Index {
     wp: number; von: string; bis: string | null; quelle: string; abstimmungen: number; mdb: number;
     regierung: string | null;
     chef: { id: string; rolle: string } | null;   // Kanzler oder Ministerpräsident, falls mit Mandat
+    linie: boolean;                               // ob es eine Regierungslinie gibt
   }[];
   personen: Person[];
 }
@@ -22,11 +23,14 @@ export interface Index {
 export interface MdB {
   id: string;
   name: string;
+  linie?: true;                    // die Regierungslinie, keine Person
+  zusatz?: string;                 // Europaparlament: nationale Partei und Land
   f: number;                       // Hauptfraktion, Index in `fraktionen`
   wechsel?: number[];              // Fraktionsfolge, falls gewechselt
   s: string;                       // Stimmen, ein Zeichen je Abstimmung
   abwesend: [number, number];      // nicht abgegeben, Abstimmungen mit Mandat
   abw: { wert: number; summe: number; n: number; gegen: number; enthalten: number } | null;
+  dev?: [number, number, number][]; // Abweichungen: Abstimmung, eigene Stimme, Fraktionslinie
   nn: number[];                    // nächste Nachbarn
   p: [number, number];             // Lage in der Karte
   r: [number, number, number];     // Lage im Raum
@@ -41,7 +45,7 @@ export interface Periode {
   namen?: string[];                // Fraktionsnamen aus der Quelle, nur Landtage
   vorannahme: number[][];
   stress: { flach: number; raum: number };
-  abstimmungen: { datum: string; titel: string; frei: boolean | null }[];
+  abstimmungen: { datum: string; titel: string; frei: boolean | null; themen?: string[] }[];
   mdb: MdB[];
 }
 
@@ -50,6 +54,7 @@ export interface Vorbereitet extends Periode {
   hauptfraktion: number[];
   abgegeben: number[];             // Ja, Nein oder Enthaltung
   index: Map<string, number>;
+  linie: number | null;            // Zeile der Regierungslinie
 }
 
 const pfad = (datei: string) => `${import.meta.env.BASE_URL}daten/${datei}`;
@@ -85,6 +90,7 @@ function lade(parlament: string, wp: number): Promise<Vorbereitet> {
       hauptfraktion: d.mdb.map(m => m.f),
       abgegeben: d.mdb.map(m => m.s.replace(/[^jne]/g, "").length),
       index: new Map(d.mdb.map((m, i) => [m.id, i])),
+      linie: d.mdb.findIndex(m => m.linie) >= 0 ? d.mdb.findIndex(m => m.linie) : null,
     }));
     cache.set(schluessel, p);
   }
@@ -108,4 +114,30 @@ export function usePeriode(parlament: string, wp: number | null): Vorbereitet | 
 
 export function vorladen(parlament: string, wp: number) {
   void lade(parlament, wp);
+}
+
+/** Je Person und Periode: Wahlperiode, eigene Fraktion, Übereinstimmung mit
+ *  jeder Fraktion und mit der Regierungslinie (Prozent). */
+export interface Verlauf {
+  namen: Record<string, string>;     // Fraktionsnamen aus der Quelle (Landtage, Europaparlament)
+  personen: Record<string, [number, string, Record<string, number>, number | null][]>;
+}
+
+const verlaeufe = new Map<string, Promise<Verlauf>>();
+
+/** Erst geladen, wenn jemand eine Person auswählt. */
+export function useVerlauf(parlament: string, aktiv: boolean): Verlauf | null {
+  const [v, setV] = useState<{ parlament: string; v: Verlauf } | null>(null);
+  useEffect(() => {
+    if (!aktiv) return;
+    let p = verlaeufe.get(parlament);
+    if (!p) {
+      p = fetch(pfad(`${parlament}/verlauf.json`)).then(r => r.json());
+      verlaeufe.set(parlament, p);
+    }
+    let aktuell = true;
+    p.then(x => { if (aktuell) setV({ parlament, v: x }); });
+    return () => { aktuell = false; };
+  }, [parlament, aktiv]);
+  return v?.parlament === parlament ? v.v : null;
 }

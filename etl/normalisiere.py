@@ -37,7 +37,9 @@ from pathlib import Path
 import numpy as np
 import openpyxl
 
+import abgeordnetenwatch
 from stata import lies
+from themen import aus_abgeordnetenwatch, aus_cap
 
 ETL = Path(__file__).parent
 ROH = ETL / "roh"
@@ -45,6 +47,9 @@ ZWISCHEN = ETL / "zwischen" / "bundestag"
 
 AB_WP = 10
 BTVOTE_BIS_WP = 19
+
+# Perioden-IDs bei abgeordnetenwatch, nur für die Themen der XLSX-Abstimmungen
+AW_PERIODE = {20: 132, 21: 161}
 
 # Konstituierende Sitzungen; eine Periode endet mit dem Beginn der nächsten.
 BEGINN = {10: "1983-03-29", 11: "1987-02-18", 12: "1990-12-20", 13: "1994-11-10",
@@ -153,8 +158,10 @@ def periode(wp, quelle, abstimmungen, stimmen, fraktion, namen):
 def btvote(personen):
     s, _ = lies(ROH / "btvote_stimmen.dta")
     a, _ = lies(ROH / "btvote_abstimmungen.dta")
-    info = {int(v): (stata_datum(d), t, None if np.isnan(f) or f == 99 else bool(f == 1))
-            for v, d, t, f in zip(a["vote_id"], a["vote_date"], a["vote_title"], a["free_vote"])}
+    info = {int(v): (stata_datum(d), t, None if np.isnan(f) or f == 99 else bool(f == 1),
+                     aus_cap(int(c) for c in (p1, p2, p3) if not np.isnan(c)))
+            for v, d, t, f, p1, p2, p3 in zip(a["vote_id"], a["vote_date"], a["vote_title"], a["free_vote"],
+                                               a["policy1"], a["policy2"], a["policy3"])}
 
     wp_all = s["elecper"].astype(int)
     perioden = {}
@@ -170,7 +177,7 @@ def btvote(personen):
             ppg = s["ppg"][i]
             fraktion[pid][j] = PPG[int(ppg)] if not np.isnan(ppg) else "fraktionslos"
             namen[pid] = personen[pid]["anzeige"] if pid in personen else f'{s["firstname"][i]} {s["lastname"][i]}'
-        abst = [{"datum": info[v][0], "titel": info[v][1], "frei": info[v][2]} for v in vids]
+        abst = [{"datum": info[v][0], "titel": info[v][1], "frei": info[v][2], "themen": info[v][3]} for v in vids]
         perioden[wp] = periode(wp, "BTVote", abst, stimmen, fraktion, namen)
     return perioden
 
@@ -263,6 +270,26 @@ def gegenprobe(bt, xl):
     return gleich, verschieden, ohne, len(set(xl_mdb) - set(bt_mdb))
 
 
+def themen_aus_abgeordnetenwatch(p, aw_id):
+    """Die XLSX haben keine Themen, abgeordnetenwatch schon. Zugeordnet wird
+    über Datum und die Summen von Ja, Nein und Enthaltung; das ist an einem
+    Tag praktisch eindeutig und braucht keinen Namensabgleich."""
+    roh = abgeordnetenwatch.lade(aw_id, ROH / "abgeordnetenwatch" / "bundestag" / f"wp{p['wp']}.json")
+    kandidaten = defaultdict(list)
+    for a in roh["abstimmungen"]:
+        z = Counter(s for _, _, s in roh["stimmen"][str(a["id"])])
+        kandidaten[a["datum"]].append(((z["yes"], z["no"], z["abstain"]), a["themen"]))
+    treffer = 0
+    for j, a in enumerate(p["abstimmungen"]):
+        z = Counter(m["stimmen"][j] for m in p["mdb"])
+        summen = (z["j"], z["n"], z["e"])
+        passend = [t for s, t in kandidaten.get(a["datum"], [])
+                   if sum(abs(x - y) for x, y in zip(s, summen)) <= 3]
+        a["themen"] = aus_abgeordnetenwatch(passend[0]) if len(passend) == 1 else []
+        treffer += len(passend) == 1
+    return treffer
+
+
 if __name__ == "__main__":
     ZWISCHEN.mkdir(parents=True, exist_ok=True)
     personen = lies_stammdaten()
@@ -277,6 +304,10 @@ if __name__ == "__main__":
     print(f"Gegenprobe WP 19: {len(xl[19]['abstimmungen'])} XLSX-Abstimmungen, "
           f"{g} gleiche und {v} abweichende Einzelstimmen, {o} ohne BTVote-Gegenstück, "
           f"{fremd} MdB nur in den XLSX")
+
+    for wp, aw_id in AW_PERIODE.items():
+        t = themen_aus_abgeordnetenwatch(xl[wp], aw_id)
+        print(f"Themen WP {wp}: {t} von {len(xl[wp]['abstimmungen'])} Abstimmungen bei abgeordnetenwatch gefunden")
 
     for wp, p in {**bt, 20: xl[20], 21: xl[21]}.items():
         (ZWISCHEN / f"wp{wp}.json").write_text(json.dumps(p, ensure_ascii=False), encoding="utf-8")

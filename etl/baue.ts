@@ -9,14 +9,19 @@
 
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import {
-  abweichungen, abwesenheit, gedaempft, hauptfraktion, kodiere, paar,
+  abweichungen, abwesenheit, FEHLT, gedaempft, hauptfraktion, kodiere, paarmatrix, regierungslinie,
+  unaehnlichkeiten, vorannahmen,
 } from "../src/lib/mass.ts";
-import { ausrichten, klassisch, smacof, type Matrix, type Punkte } from "./layout.ts";
+import { ausrichten, klassisch, smacof, type Matrix, type Punkte } from "../src/lib/layout.ts";
 
 const ZWISCHEN = new URL("./zwischen/", import.meta.url);
 const ZIEL = new URL("../public/daten/", import.meta.url);
 
-interface Regierung { text: string; chef: string; rolle: string }
+interface Regierung {
+  text: string; chef: string; rolle: string;
+  koalition?: string[];                                   // Kennungen der Regierungsfraktionen
+  wechsel?: { ab: string; koalition: string[] }[];        // Koalitionswechsel innerhalb der Periode
+}
 interface Parlament { im: string; quelle?: string; regierung: Record<string, Regierung> }
 const PARLAMENTE: Record<string, Parlament> =
   JSON.parse(readFileSync(new URL("./parlamente.json", import.meta.url), "utf-8"));
@@ -27,56 +32,50 @@ const QUELLE_AW = "abgeordnetenwatch.de (CC0): namentliche Abstimmungen, soweit 
 /** Kanten je Punkt. Nur die nächsten Nachbarn: Das gibt dem Bild den
  *  Netz-Charakter, ohne eine Viertelmillion Linien zu ziehen. */
 const NACHBARN = 4;
-/** Paare mit weniger gemeinsamen Abstimmungen fließen nicht in die
- *  Vorannahme ein, sie würden das Fraktionsmittel nur verrauschen. */
-const MIN_PAAR = 10;
+/** ID der Regierungslinie, die als letzte Zeile an die Abgeordneten angehängt wird. */
+const LINIE = "regierungslinie";
 /** Keine Fraktion, also auch keine Fraktionslinie. */
 const OHNE_LINIE = new Set(["fraktionslos", "andere"]);
 
 interface Zwischen {
   wp: number; quelle: string; von: string; bis: string | null;
-  abstimmungen: { datum: string; titel: string; frei: boolean | null }[];
+  abstimmungen: { datum: string; titel: string; frei: boolean | null; themen?: string[] }[];
   fraktionen: string[];
   namen?: string[];          // Anzeigenamen aus der Quelle (Landtage: CSU, Freie Wähler, …)
-  mdb: { id: string; name: string; stimmen: string; fraktion: string }[];
+  mdb: { id: string; name: string; zusatz?: string; stimmen: string; fraktion: string }[];
 }
+
+const ZEICHEN: Record<number, string> = { 1: "j", 0: "e", [-1]: "n", [FEHLT]: "x" };
+const prozent = (x: number) => Math.round(x * 100);
 
 const r4 = (x: number) => Math.round(x * 1e4) / 1e4;
 
-function rechne(z: Zwischen) {
-  const N = z.mdb.length, F = z.fraktionen.length;
+function rechne(z: Zwischen, regierung?: Regierung) {
+  const F = z.fraktionen.length;
   const stimmen = z.mdb.map(m => kodiere(m.stimmen));
   const fraktion = z.mdb.map(m => Int8Array.from(m.fraktion, c => (c === "-" ? -1 : Number(c))));
   const haupt = z.mdb.map(m => hauptfraktion(m.fraktion));
+  const echte = z.mdb.length;
 
-  const summe = new Float64Array(N * N), n = new Uint16Array(N * N);
-  for (let i = 0; i < N; i++)
-    for (let j = i + 1; j < N; j++) {
-      const p = paar(stimmen[i], stimmen[j]);
-      summe[i * N + j] = summe[j * N + i] = p.summe;
-      n[i * N + j] = n[j * N + i] = p.n;
-    }
-
-  // Vorannahme: mittlere Unähnlichkeit je Fraktionspaar, aus den Paaren mit
-  // genug gemeinsamen Abstimmungen.
-  const acc = Array.from({ length: F }, () => Array.from({ length: F }, () => [0, 0]));
-  let gs = 0, gn = 0;
-  for (let i = 0; i < N; i++)
-    for (let j = i + 1; j < N; j++) {
-      const c = n[i * N + j];
-      if (c < MIN_PAAR) continue;
-      const roh = summe[i * N + j] / c;
-      const [a, b] = [haupt[i], haupt[j]];
-      acc[a][b][0] += roh; acc[a][b][1]++;
-      if (a !== b) { acc[b][a][0] += roh; acc[b][a][1]++; }
-      gs += roh; gn++;
-    }
-  const vorannahme = acc.map(r => r.map(([s, c]) => (c ? s / c : gs / gn)));
-
-  const delta = new Float64Array(N * N);
-  for (let i = 0; i < N; i++)
-    for (let j = 0; j < N; j++)
-      if (i !== j) delta[i * N + j] = gedaempft(summe[i * N + j], n[i * N + j], vorannahme[haupt[i]][haupt[j]]);
+  // Die Regierungslinie stimmt immer mit der Mehrheit der Koalition. Sie läuft
+  // als zusätzliche Zeile durch dieselbe Rechnung und bekommt so ihren Platz in
+  // der Karte. In der Vorannahme zählt sie wie die größte Regierungsfraktion.
+  let linie: Int8Array | null = null;
+  if (regierung?.koalition) {
+    const phasen = [{ ab: "", koalition: regierung.koalition }, ...(regierung.wechsel ?? [])];
+    const koalition = (datum: string) => new Set(phasen.filter(ph => ph.ab <= datum).at(-1)!.koalition
+      .map(k => z.fraktionen.indexOf(k)).filter(i => i >= 0));
+    linie = regierungslinie(stimmen, fraktion, j => koalition(z.abstimmungen[j].datum));
+    const groesse = (f: number) => haupt.filter(h => h === f).length;
+    const groesste = [...koalition(z.abstimmungen[0].datum)].sort((x, y) => groesse(y) - groesse(x))[0];
+    stimmen.push(linie);
+    fraktion.push(new Int8Array(linie.length).fill(-1));
+    haupt.push(groesste);
+  }
+  const N = stimmen.length;
+  const paare = paarmatrix(stimmen);
+  const vorannahme = vorannahmen(paare, haupt, F, new Set(linie ? [N - 1] : []));
+  const delta = unaehnlichkeiten(paare, haupt, vorannahme);
   const m: Matrix = { N, d: delta };
 
   const start = klassisch(m, 3).punkte;
@@ -99,6 +98,22 @@ function rechne(z: Zwischen) {
     return c ? s / c : 0;
   });
 
+  // Für den Verlauf über die Perioden: mittlere Übereinstimmung mit jeder
+  // Fraktion und mit der Regierungslinie, in Prozent.
+  const verlauf = Array.from({ length: echte }, (_, i) => {
+    const naehe: Record<string, number> = {};
+    for (let f = 0; f < F; f++) {
+      let s = 0, c = 0;
+      for (let j = 0; j < echte; j++) if (j !== i && haupt[j] === f) { s += 1 - delta[i * N + j]; c++; }
+      if (c) naehe[z.fraktionen[f]] = prozent(s / c);
+    }
+    return { naehe, regierung: linie ? prozent(1 - delta[i * N + N - 1]) : null };
+  });
+
+  const zeilen = [
+    ...z.mdb,
+    ...(linie ? [{ id: LINIE, name: "Regierungslinie", stimmen: [...linie].map(v => ZEICHEN[v]).join(""), fraktion: "" }] : []),
+  ];
   return {
     kopf: {
       wp: z.wp, quelle: z.quelle, von: z.von, bis: z.bis,
@@ -108,24 +123,29 @@ function rechne(z: Zwischen) {
       stress: { flach: r4(flach.stress), raum: r4(raum.stress) },
       abstimmungen: z.abstimmungen,
     },
-    mdb: z.mdb.map((mdb, i) => {
+    mdb: zeilen.map((mdb, i) => {
+      const istLinie = i >= echte;
       const folge: number[] = [];
       for (const f of fraktion[i]) if (f >= 0 && folge[folge.length - 1] !== f) folge.push(f);
       const aw = abwesenheit(mdb.stimmen);
       return {
         id: mdb.id,
         name: mdb.name,
+        ...(istLinie ? { linie: true } : {}),
+        ...("zusatz" in mdb && mdb.zusatz ? { zusatz: mdb.zusatz } : {}),
         f: haupt[i],
         ...(new Set(folge).size > 1 ? { wechsel: folge } : {}),
         s: mdb.stimmen,
         abwesend: [aw.abwesend, aw.mandat],
-        abw: ohneLinie.has(haupt[i]) || abw[i].n === 0 ? null : {
+        abw: istLinie || ohneLinie.has(haupt[i]) || abw[i].n === 0 ? null : {
           wert: r4(gedaempft(abw[i].summe, abw[i].n, mittel[haupt[i]])),
           summe: abw[i].summe, n: abw[i].n, gegen: abw[i].gegen, enthalten: abw[i].enthalten,
         },
+        ...(abw[i].liste.length ? { dev: abw[i].liste } : {}),
         nn: nachbarn[i],
       };
     }),
+    verlauf,
     flach: flach.punkte,
     raum: raum.punkte,
   };
@@ -149,9 +169,11 @@ function orientiere(e: Ergebnis, lage: Punkte) {
   for (const p of lage) { p[0] *= sx; p[1] *= sy; }
 }
 
+/** Wer in beiden Perioden saß. Die Regierungslinie zählt nicht: Sie springt bei
+ *  einem Regierungswechsel ans andere Ende der Karte. */
 function gemeinsame(a: Ergebnis, b: Ergebnis): [number, number][] {
   const inB = new Map(b.mdb.map((m, i) => [m.id, i]));
-  return a.mdb.flatMap((m, i) => (inB.has(m.id) ? [[i, inB.get(m.id)!] as [number, number]] : []));
+  return a.mdb.flatMap((m, i) => (m.id !== LINIE && inB.has(m.id) ? [[i, inB.get(m.id)!] as [number, number]] : []));
 }
 
 function baueParlament(id: string, konfig: Parlament) {
@@ -163,6 +185,10 @@ function baueParlament(id: string, konfig: Parlament) {
   let vorige: Ergebnis | null = null;
   const perioden = [];
   const personen = new Map<string, { name: string; wps: number[] }>();
+  // Je Person und Periode: eigene Fraktion, Übereinstimmung mit jeder Fraktion
+  // und mit der Regierungslinie (Prozent). Lädt der Browser erst bei Auswahl.
+  const verlauf: Record<string, [number, string, Record<string, number>, number | null][]> = {};
+  const namen: Record<string, string> = {};   // Fraktionsnamen aus der Quelle, zuletzt gesehener gilt
   // Gemeinsamer Rahmen über alle Perioden: Die Karte behält beim Schieben des
   // Reglers ihren Maßstab, eine zusammenrückende Periode sieht auch so aus.
   const rahmen = { flach: [Infinity, -Infinity, Infinity, -Infinity], raum: 0 };
@@ -170,7 +196,8 @@ function baueParlament(id: string, konfig: Parlament) {
   for (const datei of dateien) {
     const t0 = performance.now();
     const z: Zwischen = JSON.parse(readFileSync(new URL(datei, quelle), "utf-8"));
-    const e = rechne(z);
+    const regierung = konfig.regierung[z.wp];
+    const e = rechne(z, regierung);
     if (!vorige) {
       orientiere(e, e.flach);
       orientiere(e, e.raum);
@@ -182,7 +209,6 @@ function baueParlament(id: string, konfig: Parlament) {
 
     // Der Regierungschef steht mit Namen in parlamente.json. Wer in der
     // Periode kein Mandat hatte (Seehofer 2008–2013), bekommt keine Markierung.
-    const regierung = konfig.regierung[z.wp];
     const treffer = regierung ? z.mdb.filter(m => m.name === regierung.chef) : [];
     if (regierung && treffer.length !== 1)
       console.warn(`  ${id} WP ${z.wp}: ${regierung.chef} ${treffer.length ? "mehrdeutig" : "ohne Mandat in den Daten"}`);
@@ -206,13 +232,16 @@ function baueParlament(id: string, konfig: Parlament) {
       abstimmungen: z.abstimmungen.length, mdb: z.mdb.length,
       regierung: regierung?.text ?? null,
       chef: treffer.length === 1 ? { id: treffer[0].id, rolle: regierung!.rolle } : null,
+      linie: Boolean(regierung?.koalition),
     });
-    for (const m of z.mdb) {
+    z.namen?.forEach((n, f) => { namen[z.fraktionen[f]] = n; });
+    z.mdb.forEach((m, i) => {
       const p = personen.get(m.id) ?? { name: m.name, wps: [] };
       p.name = m.name;
       p.wps.push(z.wp);
       personen.set(m.id, p);
-    }
+      (verlauf[m.id] ??= []).push([z.wp, z.fraktionen[e.mdb[i].f], e.verlauf[i].naehe, e.verlauf[i].regierung]);
+    });
     console.log(`${id} WP ${z.wp}: ${z.mdb.length} Abgeordnete, Stress 2D ${e.kopf.stress.flach}, `
       + `3D ${e.kopf.stress.raum}, ${Math.round(performance.now() - t0)} ms`);
     vorige = e;
@@ -227,6 +256,7 @@ function baueParlament(id: string, konfig: Parlament) {
     personen: [...personen].map(([pid, p]) => ({ id: pid, ...p }))
       .sort((a, b) => a.name.localeCompare(b.name, "de")),
   }));
+  writeFileSync(new URL("verlauf.json", ziel), JSON.stringify({ namen, personen: verlauf }));
 }
 
 const gebaut = Object.entries(PARLAMENTE).filter(([id]) => existsSync(new URL(`${id}/`, ZWISCHEN)));

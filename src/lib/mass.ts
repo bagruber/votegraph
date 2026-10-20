@@ -33,12 +33,13 @@ export interface Paar {
 
 /** Nur Abstimmungen, bei denen beide abgestimmt haben, zählen. Fehlt eine
  *  Seite, verschiebt das nichts in die eine oder andere Richtung, es macht
- *  die Grundlage nur dünner. */
-export function paar(a: Int8Array, b: Int8Array): Paar {
+ *  die Grundlage nur dünner. Die Maske beschränkt auf eine Auswahl von
+ *  Abstimmungen (Themenfilter): 1 zählt, 0 nicht. */
+export function paar(a: Int8Array, b: Int8Array, maske?: Uint8Array): Paar {
   let summe = 0, n = 0;
   for (let i = 0; i < a.length; i++) {
     const x = a[i], y = b[i];
-    if (x === FEHLT || y === FEHLT) continue;
+    if (x === FEHLT || y === FEHLT || (maske && !maske[i])) continue;
     summe += distanz(x, y);
     n++;
   }
@@ -75,17 +76,71 @@ export function zuPerson(
   stimmen: Int8Array[],
   hauptfraktion: number[],
   vorannahme: number[][],
+  maske?: Uint8Array,
 ): { delta: Float64Array; n: Uint16Array } {
   const delta = new Float64Array(stimmen.length);
   const n = new Uint16Array(stimmen.length);
   const fe = hauptfraktion[ego];
   for (let i = 0; i < stimmen.length; i++) {
     if (i === ego) continue;
-    const p = paar(stimmen[ego], stimmen[i]);
+    const p = paar(stimmen[ego], stimmen[i], maske);
     delta[i] = gedaempft(p.summe, p.n, vorannahme[fe][hauptfraktion[i]]);
     n[i] = p.n;
   }
   return { delta, n };
+}
+
+export interface Paarmatrix {
+  N: number;
+  summe: Float64Array;   // N×N, aufsummierte Distanz
+  n: Uint16Array;        // N×N, gemeinsame Abstimmungen
+}
+
+/** Alle Paare einer Periode auf einmal, für Karte und Vorannahme. */
+export function paarmatrix(stimmen: Int8Array[], maske?: Uint8Array): Paarmatrix {
+  const N = stimmen.length;
+  const summe = new Float64Array(N * N), n = new Uint16Array(N * N);
+  for (let i = 0; i < N; i++)
+    for (let j = i + 1; j < N; j++) {
+      const p = paar(stimmen[i], stimmen[j], maske);
+      summe[i * N + j] = summe[j * N + i] = p.summe;
+      n[i * N + j] = n[j * N + i] = p.n;
+    }
+  return { N, summe, n };
+}
+
+/** Paare mit weniger gemeinsamen Abstimmungen fließen nicht in die
+ *  Vorannahme ein, sie würden das Fraktionsmittel nur verrauschen. */
+export const MIN_PAAR = 10;
+
+/** Vorannahme: mittlere Unähnlichkeit je Fraktionspaar, aus den Paaren mit
+ *  genug gemeinsamen Abstimmungen. `ohne` sind Zeilen, die keine Person sind
+ *  (die Regierungslinie) und das Fraktionsmittel nicht mitbestimmen. */
+export function vorannahmen(m: Paarmatrix, haupt: number[], F: number, ohne = new Set<number>()): number[][] {
+  const { N, summe, n } = m;
+  const acc = Array.from({ length: F }, () => Array.from({ length: F }, () => [0, 0]));
+  let gs = 0, gn = 0;
+  for (let i = 0; i < N; i++)
+    for (let j = i + 1; j < N; j++) {
+      const c = n[i * N + j];
+      if (c < MIN_PAAR || ohne.has(i) || ohne.has(j)) continue;
+      const roh = summe[i * N + j] / c;
+      const [a, b] = [haupt[i], haupt[j]];
+      acc[a][b][0] += roh; acc[a][b][1]++;
+      if (a !== b) { acc[b][a][0] += roh; acc[b][a][1]++; }
+      gs += roh; gn++;
+    }
+  return acc.map(r => r.map(([s, c]) => (c ? s / c : gn ? gs / gn : 0.5)));
+}
+
+/** Gedämpfte Unähnlichkeit aller Paare, als flache N×N-Matrix. */
+export function unaehnlichkeiten(m: Paarmatrix, haupt: number[], vorannahme: number[][]): Float64Array {
+  const { N, summe, n } = m;
+  const delta = new Float64Array(N * N);
+  for (let i = 0; i < N; i++)
+    for (let j = 0; j < N; j++)
+      if (i !== j) delta[i * N + j] = gedaempft(summe[i * N + j], n[i * N + j], vorannahme[haupt[i]][haupt[j]]);
+  return delta;
 }
 
 /** Die Fraktion, für die jemand in der Periode am häufigsten abgestimmt hat.
@@ -121,6 +176,35 @@ export interface Abweichung {
   n: number;          // Abstimmungen mit Linie, bei denen die Person abstimmte
   gegen: number;      // davon Gegenstimmen (ja gegen nein oder umgekehrt)
   enthalten: number;  // davon Enthaltungen gegen eine Ja- oder Nein-Linie
+  liste: [number, number, number][];   // je Abweichung: Abstimmung, eigene Stimme, Linie
+}
+
+/** Häufigste Stimme aus [nein, Enthaltung, ja], bei Gleichstand keine. */
+function mehrheit(z: [number, number, number]): number | undefined {
+  const max = Math.max(...z);
+  return max > 0 && z.filter(x => x === max).length === 1 ? z.indexOf(max) - 1 : undefined;
+}
+
+/** Die Regierungslinie: je Abstimmung die häufigste Stimme der anwesenden
+ *  Abgeordneten aus Koalitionsfraktionen, bei Gleichstand keine. Eine gedachte
+ *  Person, die immer mit der Koalitionsmehrheit stimmt: die eigentliche Mitte
+ *  der Regierung, die der Kanzler selten ist, weil er selten abstimmt.
+ *  `koalition(j)` nennt die Fraktionsindizes, die bei Abstimmung j regierten. */
+export function regierungslinie(
+  stimmen: Int8Array[], fraktion: Int8Array[], koalition: (j: number) => Set<number>,
+): Int8Array {
+  const P = stimmen[0]?.length ?? 0;
+  const linie = new Int8Array(P).fill(FEHLT);
+  for (let j = 0; j < P; j++) {
+    const k = koalition(j);
+    const z: [number, number, number] = [0, 0, 0];
+    for (let i = 0; i < stimmen.length; i++) {
+      const v = stimmen[i][j];
+      if (v !== FEHLT && k.has(fraktion[i][j])) z[v + 1]++;
+    }
+    linie[j] = mehrheit(z) ?? FEHLT;
+  }
+  return linie;
 }
 
 /** Fraktionslinie je Abstimmung: die häufigste Stimme unter den anwesenden
@@ -135,7 +219,7 @@ export function abweichungen(
   fraktion: Int8Array[],
   ohneLinie: Set<number>,
 ): Abweichung[] {
-  const out = stimmen.map(() => ({ summe: 0, n: 0, gegen: 0, enthalten: 0 }));
+  const out: Abweichung[] = stimmen.map(() => ({ summe: 0, n: 0, gegen: 0, enthalten: 0, liste: [] }));
   const P = stimmen[0]?.length ?? 0;
   for (let j = 0; j < P; j++) {
     const zahl = new Map<number, [number, number, number]>();  // nein, Enth., ja
@@ -148,8 +232,8 @@ export function abweichungen(
     }
     const linie = new Map<number, number>();
     for (const [f, z] of zahl) {
-      const max = Math.max(...z);
-      if (z.filter(x => x === max).length === 1) linie.set(f, z.indexOf(max) - 1);
+      const l = mehrheit(z);
+      if (l !== undefined) linie.set(f, l);
     }
     for (let i = 0; i < stimmen.length; i++) {
       const v = stimmen[i][j], l = linie.get(fraktion[i][j]);
@@ -160,6 +244,7 @@ export function abweichungen(
       a.n++;
       if (d === 1) a.gegen++;
       else if (d === 0.5 && v === 0) a.enthalten++;
+      if (d > 0) a.liste.push([j, v, l]);
     }
   }
   return out;

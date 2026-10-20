@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  abweichungen, abwesenheit, distanz, FEHLT, gedaempft, hauptfraktion, kodiere, paar, zuPerson,
+  abweichungen, abwesenheit, distanz, FEHLT, gedaempft, hauptfraktion, kodiere, paar, paarmatrix,
+  regierungslinie, vorannahmen, zuPerson,
 } from "./mass.ts";
 
 const aehnlichkeit = (gleich: number, von: number, vorannahme = 0.5, k?: number) =>
@@ -87,8 +88,8 @@ describe("Fraktionslinie und Abweichung", () => {
     const stimmen = ["jj", "jj", "jn", "je"].map(kodiere);
     const fr = ["00", "00", "00", "00"].map(f);
     const a = abweichungen(stimmen, fr, new Set());
-    expect(a[2]).toEqual({ summe: 1, n: 2, gegen: 1, enthalten: 0 });
-    expect(a[3]).toEqual({ summe: 0.5, n: 2, gegen: 0, enthalten: 1 });
+    expect(a[2]).toEqual({ summe: 1, n: 2, gegen: 1, enthalten: 0, liste: [[1, -1, 1]] });
+    expect(a[3]).toEqual({ summe: 0.5, n: 2, gegen: 0, enthalten: 1, liste: [[1, 0, 1]] });
     expect(a[0].summe).toBe(0);
   });
 
@@ -109,7 +110,53 @@ describe("Fraktionslinie und Abweichung", () => {
     const stimmen = ["jj", "jj", "jn", "nn", "nn"].map(kodiere);
     const fr = ["00", "00", "01", "11", "11"].map(f);
     const a = abweichungen(stimmen, fr, new Set());
-    expect(a[2]).toEqual({ summe: 0, n: 2, gegen: 0, enthalten: 0 });
+    expect(a[2]).toEqual({ summe: 0, n: 2, gegen: 0, enthalten: 0, liste: [] });
+  });
+});
+
+describe("Aufschlüsselung der Abweichung", () => {
+  it("führt so viele Abstimmungen auf, wie gezählt wurden", () => {
+    const stimmen = ["jjjje", "jjjjj", "jnnej", "jjjjj"].map(kodiere);
+    const fr = ["00000", "00000", "00000", "00000"].map(s => Int8Array.from([...s].map(Number)));
+    const a = abweichungen(stimmen, fr, new Set())[2];
+    expect(a.liste.length).toBe(a.gegen + a.enthalten);
+    expect(a.liste.map(([j]) => j)).toEqual([1, 2, 3]);
+  });
+});
+
+describe("Regierungslinie", () => {
+  const f = (s: string) => Int8Array.from([...s].map(c => (c === "-" ? -1 : Number(c))));
+
+  it("folgt der Mehrheit der Koalition, nicht des ganzen Parlaments", () => {
+    // Koalition = Fraktion 0 (zwei Mitglieder), Opposition = Fraktion 1 (drei)
+    const stimmen = ["jj", "jn", "nn", "nn", "nn"].map(kodiere);
+    const fr = ["00", "00", "11", "11", "11"].map(f);
+    const l = regierungslinie(stimmen, fr, () => new Set([0]));
+    expect([...l]).toEqual([1, FEHLT]);     // zweite Abstimmung: 1:1 in der Koalition
+  });
+
+  it("wechselt die Koalition innerhalb der Periode", () => {
+    const stimmen = ["jj", "nn"].map(kodiere);
+    const fr = ["00", "11"].map(f);
+    const l = regierungslinie(stimmen, fr, j => new Set([j === 0 ? 0 : 1]));
+    expect([...l]).toEqual([1, -1]);
+  });
+});
+
+describe("Paarmatrix und Vorannahme", () => {
+  it("rechnet dasselbe wie paar() und lässt ausgeschlossene Zeilen aus der Vorannahme", () => {
+    const stimmen = ["jjjjjjjjjj", "jjjjjjjjjj", "nnnnnnnnnn", "jjjjjjjjjj"].map(kodiere);
+    const m = paarmatrix(stimmen);
+    expect(m.summe[0 * 4 + 2]).toBe(paar(stimmen[0], stimmen[2]).summe);
+    const mit = vorannahmen(m, [0, 0, 1, 1], 2);
+    const ohne = vorannahmen(m, [0, 0, 1, 1], 2, new Set([3]));
+    expect(mit[0][1]).toBeCloseTo(2 / 4 * 1);    // (1 + 1 + 0 + 0) / 4
+    expect(ohne[0][1]).toBe(1);
+  });
+
+  it("beschränkt sich mit Maske auf eine Auswahl von Abstimmungen", () => {
+    const [a, b] = ["jjnn", "jjjj"].map(kodiere);
+    expect(paar(a, b, Uint8Array.from([1, 1, 0, 0]))).toEqual({ summe: 0, n: 2 });
   });
 });
 

@@ -44,6 +44,20 @@ export function Methodik({ index, periode }: { index: Index; periode: Vorbereite
             der einzelnen Abstimmung, Wechsel innerhalb einer Periode sind berücksichtigt. Abstimmungen ohne
             Fraktionsdisziplin zählen vorerst mit.
           </p>
+          <h3>Regierungslinie</h3>
+          <p>
+            Eine gedachte Person, die bei jeder Abstimmung so stimmt wie die Mehrheit der anwesenden Abgeordneten
+            aus den Regierungsfraktionen. Wechselt die Koalition innerhalb einer Periode (die Ampel ohne FDP ab
+            November 2024), wechselt die Linie mit. Das Europaparlament hat keine Regierung und deshalb keine Linie.
+          </p>
+          <h3>Themen</h3>
+          <p>
+            Jede Abstimmung ist bis zu mehreren von sechs Themen zugeordnet: im Bundestag bis 2021 nach den
+            Politikfeldern, die BTVote kodiert, danach und in den Landtagen nach den Themen von abgeordnetenwatch, im
+            Europaparlament nach den Sachgebieten des Legislative Observatory. Eine Themenkarte rechnet der Browser
+            nach denselben Regeln selbst und richtet sie an der Karte der ganzen Periode aus. Unter zehn
+            Abstimmungen gibt es keine.
+          </p>
           <h3>Quellen</h3>
           <p>{index.quelle} Stand der Daten: {new Date(index.erstellt).toLocaleDateString("de-DE")}.</p>
         </div>
